@@ -1,0 +1,263 @@
+#!/bin/bash
+
+#Validate root user
+if [ $(id -u) != 0 ]; then
+        printf "CMS Permission Tool: This script must be run as root.\n Terminating...\n"
+        exit 1
+fi
+
+TEMP=`getopt -o ilvhqdugc: --long installation,license,version,help,quiet,dir:,user:,group:,cms: \
+             -n 'CMS Permission Tool' -- "$@"`
+
+if [ $? != 0 ] ; then echo "Terminating..." >&2 ; exit 1 ; fi
+
+eval set -- "$TEMP"
+
+# Print small help and error messages
+print_help() {
+echo -e "\e[31m\e[1m$1\e[0m\n" #Colorized error message
+
+cat <<-HELP
+Usage: cmspt [OPTIONS]...
+Options:
+ -c, --cms name     Name or abbreviation of the CMS used.
+ -d, --dir path     Path to root installation directory of the CMS.
+ -g, --group        Name of the web server group. Defaults to www-data.
+ -h, --help         Display man like page with more information.
+ -i, --installation Use during installation. Do not forget to run without after Installation.
+ -l, --license      Show License.
+ -q, --quiet        Turn off normal output, errors and warnings are still shown.
+ -u, --user         Name of the local Linux user.
+ -v, --version      Print the current version number of the script.
+
+Report cmspt bugs to cmspt-dev@pwnz.se or on github:
+https://github.com/nsahq/cmspt
+Use -h or --help for more information and examples.
+Script created and maintained by Jonas Werme.
+HELP
+exit 0
+}
+
+#Print status message
+print_status(){
+if [ ${QUIET} == false ]; then
+	printf "$1\n\n"
+fi
+}
+
+#Print MIT license
+print_license(){
+echo -e "\e[1m\e[4m
+The MIT License (MIT)\e[0m
+
+Copyright (c) 2014 Jonas Werme
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the 'Software'), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in
+all copies or substantial portions of the Software.
+
+\e[1mTHE SOFTWARE IS PROVIDED 'AS IS', WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+THE SOFTWARE.\e[0m";
+}
+
+print_full_help() {
+echo -e "\e[1m\e[4mNAME\e[0m\e[1m
+  cmspt\e[0m
+	Content Management System Permission Tool. Sets correct file and folder
+	permissions for WordPress and Drupal installations.
+
+\e[1m\e[4mUSAGE\e[0m
+  cmspt [OPTIONS]
+
+\e[1m\e[4mDESCRIPTION\e[0m
+  -c name, --cms name
+	Takes a non-case-sensitive name or abbreviation of the CMS.
+	(e.g. WordPress, Drupal, wp, dp)
+
+  -d path, --dir path
+	Location of your Content Management Systems root directory.
+
+  -g name, --group name
+	Groupname of the web server group. Defaults to www-data as used
+	by Apache and nginx.
+
+  -h, --help
+	View help file.
+
+  -i, --install
+	Special option without arguments that sets special file
+	permissions during installation of the CMS. When installation
+	is finished this script can be run again without this flag, to change
+	settings files and folders  back to correct permissions.
+
+  -u name, --user name
+	Username of the user that you want to give
+	files/directories ownership.
+
+  -v, --version
+	Print the version number of the script.
+
+\e[1m\e[4mEXAMPLES\e[0m
+  Example 1: 
+  (sudo) bash ${0##*/} --dir=/home/myuser/public_html/drupal --user=myuser --group=www-data --cms=drupal
+
+  Example 2: 
+  (sudo) bash ${0##*/} --dir=/home/myuser/public_html/drupal --user=myuser --cms=wp --install
+
+  Example 3: 
+  (sudo) bash ${0##*/} --dir=/home/myuser/public_html/drupal --user=myuser --cms=wp"
+
+exit 0
+}
+
+#Copy files and prompt about status
+copy_file(){
+
+if [ ${QUIET} == false ]; then 
+	if [ -n $1 ] && [ -n $2 ] && [ -f $1 ] && [ ! -f $2 ]; then
+		while true; do
+    			read -p "Attempt to create the missing file? (y/n)" yn
+    			case $yn in
+			[Yy]* ) cp $1 $2; printf "Done!\nRe-run the command to set appropriate permissions.\n\n"; exit 0;;
+        		[Nn]* ) exit 0;;
+	 		* ) echo "Please answer yes or no.";;
+			esac
+		done
+	else
+		printf "For information about how to create the file,\nplease reffer to the offical documentation.\n\n"
+	fi
+fi
+
+}
+
+INSTALL=false
+QUIET=false
+DIR=
+USER=
+GROUP="www-data"
+CMS=
+while true; do
+  case "$1" in
+    -i | --installation ) INSTALL=true; shift ;;
+    -q | --quiet ) QUIET=true; shift ;;
+    -h | --help ) print_full_help | less -r -e; exit 0 ;;
+    -l | --license ) print_license | less -r -e; exit 0 ;;
+    -v | --version ) printf "CMS Permission Tool Version: 0.1 Beta .\nCreated by Jonas Werme\n"; exit 0 ;;
+    -d | --dir ) DIR=`echo "$2" | sed -e "s/\/*$//" `; shift 2 ;; #remove trailing slash just to be sure
+    -u | --user ) USER="$2"; shift 2 ;;
+    -g | --group ) GROUP="$2"; shift 2 ;;
+    -c | --cms ) CMS="$2"; shift 2 ;;
+    -- ) shift; break ;;
+    * ) break ;;
+  esac
+done
+
+#Check for CMS and valid installations
+if [ -z "${CMS}" ]; then
+	print_help "You must specify a CMS."
+	exit 1
+fi
+
+#Validate CMS dir
+CMS=${CMS,,}
+if [ ${CMS} == "drupal" ] || [ ${CMS} == "dp" ]; then
+	CMS="drupal"
+	if [ -z "${DIR}" ] || [ ! -d "${DIR}/sites" ] || [ ! -f "${DIR}/core/modules/system/system.module" ] && [ ! -f "${DIR}/modules/system/system.module" ]; then
+		print_help "Please provide a valid Drupal installation directory."
+		exit 1
+	fi
+elif [ ${CMS} == "wordpress" ] || ${CMS} == "wp" ]; then
+	CMS="wordpress"
+	if [ -z "${DIR}" ] || [ ! -d "${DIR}/wp-content" ] || [ ! -d "${DIR}/wp-includes" ] || [ ! -f "${DIR}/wp-settings.php" ]; then
+		print_help "Please provide a valid WordPress installation directory."
+		exit 1
+	fi
+else
+	print_help "You must specify a valid CMS.\nCurrently we support WordPress and Drupal."
+	exit 1
+fi
+
+#Check to see if user is present on the local system
+if [ -z "${USER}" ] || [ -z $(id -un ${USER} 2> /dev/null) ]; then
+	print_help "Please provide a valid local Linux user."
+	exit 1
+fi
+
+#Check to see if the group is present on the local system
+if [ -z "${GROUP}" ] || [ -z $(id -gn ${GROUP} 2> /dev/null) ]; then
+	print_help "Please provide a valid local Linux group."
+	exit 1
+fi
+
+#Perform common file changes
+print_status "Setting ownership recursively of ${DIR} to:\nUser: ${USER} \nGroup: ${GROUP}"
+chown -R ${USER}:${GROUP} ${DIR}
+
+print_status "Setting directory permissions recursively to 'rwxr-x---' (750) in:\n${DIR}"
+find ${DIR} -type d -exec chmod u=rwx,g=rx,o= '{}' \;
+
+print_status "Setting file permissions recursively to 'rw-r-----' (640) in:\n${DIR}"
+find ${DIR} -type f -exec chmod u=rw,g=r,o= '{}' \;
+
+if [ ${CMS} == "drupal" ]; then
+#Drupal specific changes
+	print_status "Setting 'files'-directories to 'rwxrwx---' (770) in:\n${DIR}/sites"
+
+	find ${DIR}/sites -type d -name files -exec chmod ug=rwx,o= '{}' \;
+
+	print_status "Setting all 'files'-directories to 'rwxrwx---' (770)."
+	print_status "Setting files in all 'files'-directories to 'rw-rw----' (660)."
+	for file in ${DIR}/sites/*/files; do
+		find ${file} -type d -exec chmod ug=rwx,o= '{}' \;
+		find ${file} -type f -exec chmod ug=rw,o= '{}' \;
+	done
+
+	if [ -e ${DIR}/sites/default/settings.php ]; then
+
+		if [ ${INSTALL} == true ]; then
+			printf "*WARNING! INSTALLATION MODE SETTINGS !WARNING*\nMake sure you run the script without the --install/-i option after installation is completed.\n\n"
+			print_status "Setting file permissions to 'rw-rw----' (660) for:${DIR}/sites/default/*settings.php"
+        	       	find ${DIR}/sites/default -type f -name *settings.php -exec chmod ug=rw,o= '{}' \;
+		else
+			print_status "Setting file permissions to 'rw-r----' (640) for:${DIR}/sites/default/*settings.php"
+	      	        find ${DIR}/sites/default -type f -name *settings.php -exec chmod u=rw,g=r,o= '{}' \;
+		fi
+
+	else
+		printf "ERROR: Your Drupal installation does not yet have a settings.php file.\n"
+		copy_file "${DIR}/sites/default/default.settings.php" "${DIR}/sites/default/settings.php"
+	fi
+elif [ ${CMS} == "wordpress" ]; then
+#WordPress specific changes
+	if [ -e ${DIR}/wp-config.php ]; then
+
+		if [ ${INSTALL} == true ]; then
+			printf "*WARNING! INSTALLATION MODE SETTINGS !WARNING*\nMake sure you run the script without the --install/-i option after installation is completed.\n\n"
+			print_status "Setting file permissions to 'rw-rw----' (660) for:${DIR}/wp-config.php"
+        	       	find ${DIR} -type f -name wp-config.php -exec chmod ug=rw,o= '{}' \;
+		else
+			print_status "Setting file permissions to 'rw-r-----' (640) for:${DIR}/wp-config.php"
+	      	        find ${DIR} -type f -name wp-config.php -exec chmod u=rw,g=r,o= '{}' \;
+		fi
+
+	else
+		printf "ERROR: Your Drupal installation does not yet have a settings.php file.\n"
+		#Wordpress can not populate an empty file or repopulate the samle.
+		#This feature will be worked on for beta 0.2.
+		#touch /tmp/wp-config.php.tmp
+		#copy_file "/tmp/wp-config.php.tmp" "${DIR}/wp-config.php"
+	fi
+
+fi
+
